@@ -1,0 +1,897 @@
+openapi: 3.0.3
+info:
+  title: API управления мероприятиями — площадка с колесом обозрения
+  version: 1.0.0
+  description: Проектный API-контракт для координации VIP-мероприятий на площадке с колесом обозрения. Портфолио-кейс
+    README and HTML describe the business scope; fields and examples not explicitly present in those materials
+    are proposed assumptions to validate. This is an API specification, not a running backend.
+  x-reconstruction-notes:
+  - Reconstructed from the portfolio README and published HTML page; not guaranteed to match a lost original
+    file.
+  - Request/response fields, example values, staff role enum, and some error codes are proposed design
+    choices.
+  - The server URL is a placeholder. This file defines a contract and does not implement a backend.
+  - The portfolio lists 5 + 2 + 2 + 2 + 2 operations, which totals 13 operations (not 12).
+servers:
+- url: https://api.example.com/v1
+  description: Только условное значение — замените на фактический базовый URL, если будет реализован backend.
+tags:
+- name: Events
+  description: Создание и управление бронированиями на протяжении жизненного цикла мероприятия.
+- name: Cabins
+  description: Проверка доступности и назначение VIP-кабинок мероприятиям.
+- name: Services
+  description: Управление услугами кейтеринга, декора, фото-, видеосъёмки и оборудования.
+- name: Staff
+  description: Назначение сотрудников на мероприятия.
+- name: Schedule
+  description: Просмотр расписания на день и выявление конфликтов.
+paths:
+  /events:
+    get:
+      tags:
+      - Events
+      summary: Получить список мероприятий за дату
+      description: Возвращает мероприятия, запланированные на указанную дату.
+      parameters:
+      - $ref: '#/components/parameters/DateQuery'
+      responses:
+        '200':
+          description: Events returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - total
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventSummary'
+                  total:
+                    type: integer
+                    minimum: 0
+              example:
+                items:
+                - &id002
+                  eventId: evt-1042
+                  title: VIP-свадебная церемония
+                  date: '2026-11-14'
+                  startTime: '16:00:00'
+                  endTime: '17:30:00'
+                  guestCount: 24
+                  status: CONFIRMED
+                total: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags:
+      - Events
+      summary: Создать бронирование мероприятия
+      description: 'Создаёт бронирование со статусом DRAFT. Предлагаемое бизнес-правило: проверить, что время начала
+        time is earlier than the end time and guest count is positive. Whether a cabin must be assigned
+        at creation time is not specified in the portfolio materials.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+      responses:
+        '201':
+          description: Черновик мероприятия создан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example:
+                eventId: evt-1042
+                title: VIP-свадебная церемония
+                date: '2026-11-14'
+                startTime: '16:00:00'
+                endTime: '17:30:00'
+                guestCount: 24
+                status: DRAFT
+                clientName: Anna Petrova
+                clientContact: anna@example.com
+                notes: Coordinate wheel launch with engineering team.
+                services: []
+                staff: []
+                createdAt: '2026-10-18T10:00:00Z'
+                updatedAt: '2026-10-18T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /events/{eventId}:
+    parameters:
+    - $ref: '#/components/parameters/EventId'
+    get:
+      tags:
+      - Events
+      summary: Получить сведения о мероприятии
+      description: Возвращает сведения о мероприятии, включая назначенные услуги и персонал.
+      responses:
+        '200':
+          description: Мероприятие найдено.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example: &id005
+                eventId: evt-1042
+                title: VIP-свадебная церемония
+                date: '2026-11-14'
+                startTime: '16:00:00'
+                endTime: '17:30:00'
+                guestCount: 24
+                status: CONFIRMED
+                clientName: Anna Petrova
+                clientContact: anna@example.com
+                notes: Coordinate wheel launch with engineering team.
+                cabin:
+                  cabinId: cabin-vip-02
+                  name: VIP Cabin 02
+                  capacity: 30
+                  isVip: true
+                services: []
+                staff: []
+                createdAt: '2026-10-18T10:00:00Z'
+                updatedAt: '2026-10-18T11:30:00Z'
+
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Events
+      summary: Частично обновить мероприятие
+      description: Обновляет разрешённые поля, например время, количество гостей или примечания.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventRequest'
+      responses:
+        '200':
+          description: Мероприятие обновлено.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example: *id005
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /events/{eventId}/status:
+    parameters:
+    - $ref: '#/components/parameters/EventId'
+    patch:
+      tags:
+      - Events
+      summary: Изменить статус мероприятия
+      description: 'Proposed allowed transitions: DRAFT → CONFIRMED; CONFIRMED → IN_PROGRESS or CANCELLED;
+        IN_PROGRESS → COMPLETED. Other transitions should return 409. Confirm the transition matrix with
+        business stakeholders.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  $ref: '#/components/schemas/EventStatus'
+                cancellationReason:
+                  type: string
+                  maxLength: 500
+                  description: Required by business rule when cancelling, if applicable.
+            example:
+              status: CONFIRMED
+      responses:
+        '200':
+          description: Статус изменён.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example:
+                eventId: evt-1042
+                title: VIP-свадебная церемония
+                date: '2026-11-14'
+                startTime: '16:00:00'
+                endTime: '17:30:00'
+                guestCount: 24
+                status: CONFIRMED
+                clientName: Anna Petrova
+                clientContact: anna@example.com
+                notes: Coordinate wheel launch with engineering team.
+                cabin:
+                  cabinId: cabin-vip-02
+                  name: VIP Cabin 02
+                  capacity: 30
+                  isVip: true
+                services: []
+                staff: []
+                createdAt: '2026-10-18T10:00:00Z'
+                updatedAt: '2026-10-18T11:30:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Запрошенный переход статуса недопустим.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_STATUS_TRANSITION
+                message: Event cannot move from COMPLETED to CONFIRMED.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /cabins:
+    get:
+      tags:
+      - Cabins
+      summary: Найти доступные кабинки
+      description: Возвращает кабинки, доступные на указанном временном интервале.
+      parameters:
+      - name: date
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: startTime
+        in: query
+        required: true
+        schema:
+          type: string
+          format: time
+        description: Местное время начала на площадке.
+      - name: durationMinutes
+        in: query
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Список доступных кабинок получен.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Cabin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /events/{eventId}/cabin:
+    parameters:
+    - $ref: '#/components/parameters/EventId'
+    put:
+      tags:
+      - Cabins
+      summary: Назначить кабинку мероприятию
+      description: Назначает кабинку, если она доступна на время мероприятия. Сервис должен проверить
+        for overlapping bookings and return 409 Conflict if the cabin is already booked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cabinId
+              properties:
+                cabinId:
+                  type: string
+                  minLength: 1
+            example:
+              cabinId: cabin-vip-02
+      responses:
+        '200':
+          description: Кабинка назначена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example: *id005
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Кабинка уже забронирована на пересекающийся интервал времени.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: &id004
+                code: CABIN_ALREADY_BOOKED
+                message: The selected cabin is not available for this time slot.
+                details:
+                - field: cabinId
+                  issue: Overlaps with event evt-1043.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /events/{eventId}/services:
+    parameters:
+    - $ref: '#/components/parameters/EventId'
+    get:
+      tags:
+      - Services
+      summary: Получить список услуг мероприятия
+      responses:
+        '200':
+          description: Список услуг получен.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventService'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - Services
+      summary: Добавить услугу к мероприятию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '201':
+          description: Услуга добавлена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventService'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /events/{eventId}/staff:
+    parameters:
+    - $ref: '#/components/parameters/EventId'
+    get:
+      tags:
+      - Staff
+      summary: Получить список назначенного персонала
+      responses:
+        '200':
+          description: Список назначений персонала получен.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffAssignment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - Staff
+      summary: Назначить сотрудника мероприятию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStaffAssignmentRequest'
+      responses:
+        '201':
+          description: Сотрудник назначен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: У сотрудника есть пересекающееся назначение.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: STAFF_ALREADY_ASSIGNED
+                message: Staff member staff-018 has an overlapping assignment.
+                details:
+                - field: staffMemberId
+                  issue: Overlaps with event evt-1043.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /schedule/{date}:
+    parameters:
+    - name: date
+      in: path
+      required: true
+      schema:
+        type: string
+        format: date
+    get:
+      tags:
+      - Schedule
+      summary: Получить расписание на день
+      description: Возвращает хронологию мероприятий и операционных этапов на день.
+      responses:
+        '200':
+          description: Расписание получено.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - date
+                - items
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScheduleItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /schedule/{date}/conflicts:
+    parameters:
+    - name: date
+      in: path
+      required: true
+      schema:
+        type: string
+        format: date
+    get:
+      tags:
+      - Schedule
+      summary: Выявить конфликты расписания
+      description: "Проверяет: (1) пересекающиеся бронирования одной кабинки; (2) пересекающиеся назначения одного сотрудника; (3) недостаточные интервалы между операционными активностями. Минимальный интервал и правила исключения отменённых/черновых мероприятий необходимо согласовать с заинтересованными сторонами."
+      responses:
+        '200':
+          description: Проверка конфликтов завершена.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - date
+                - hasConflicts
+                - items
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  hasConflicts:
+                    type: boolean
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScheduleConflict'
+              example:
+                date: '2026-11-14'
+                hasConflicts: true
+                items:
+                - &id003
+                  type: CABIN_OVERLAP
+                  description: VIP-кабинка 02 назначена двум мероприятиям с пересекающимися временными интервалами.
+                  eventIds:
+                  - evt-1042
+                  - evt-1043
+                  resourceId: cabin-vip-02
+                  startDateTime: '2026-11-14T16:00:00+03:00'
+                  endDateTime: '2026-11-14T16:30:00+03:00'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+components:
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      description: Уникальный идентификатор мероприятия.
+      schema:
+        type: string
+        minLength: 1
+    DateQuery:
+      name: date
+      in: query
+      required: true
+      description: Дата на площадке, для которой нужно получить список.
+      schema:
+        type: string
+        format: date
+  schemas:
+    EventStatus:
+      type: string
+      enum:
+      - DRAFT
+      - CONFIRMED
+      - IN_PROGRESS
+      - COMPLETED
+      - CANCELLED
+    EventSummary:
+      type: object
+      required:
+      - eventId
+      - title
+      - date
+      - startTime
+      - endTime
+      - status
+      properties:
+        eventId:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+          format: date
+        startTime:
+          type: string
+          format: time
+        endTime:
+          type: string
+          format: time
+        guestCount:
+          type: integer
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/EventStatus'
+      example: *id002
+    Event:
+      allOf:
+      - $ref: '#/components/schemas/EventSummary'
+      - type: object
+        properties:
+          clientName:
+            type: string
+          clientContact:
+            type: string
+          notes:
+            type: string
+          cabin:
+            $ref: '#/components/schemas/Cabin'
+          services:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventService'
+          staff:
+            type: array
+            items:
+              $ref: '#/components/schemas/StaffAssignment'
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+      example: *id005
+    CreateEventRequest:
+      type: object
+      required:
+      - title
+      - clientName
+      - date
+      - startTime
+      - endTime
+      - guestCount
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        clientName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        clientContact:
+          type: string
+          maxLength: 200
+        date:
+          type: string
+          format: date
+        startTime:
+          type: string
+          format: time
+        endTime:
+          type: string
+          format: time
+        guestCount:
+          type: integer
+          minimum: 1
+        notes:
+          type: string
+          maxLength: 2000
+      example:
+        title: VIP-свадебная церемония
+        clientName: Anna Petrova
+        clientContact: anna@example.com
+        date: '2026-11-14'
+        startTime: '16:00:00'
+        endTime: '17:30:00'
+        guestCount: 24
+        notes: Coordinate wheel launch with engineering team.
+    UpdateEventRequest:
+      type: object
+      minProperties: 1
+      description: Необходимо передать хотя бы одно изменяемое поле. Пустой объект не проходит проверку схемы запроса (422).
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        date:
+          type: string
+          format: date
+        startTime:
+          type: string
+          format: time
+        endTime:
+          type: string
+          format: time
+        guestCount:
+          type: integer
+          minimum: 1
+        notes:
+          type: string
+          maxLength: 2000
+      example:
+        startTime: '16:15:00'
+        guestCount: 26
+        notes: Two additional guests confirmed.
+    Cabin:
+      type: object
+      required:
+      - cabinId
+      - name
+      properties:
+        cabinId:
+          type: string
+        name:
+          type: string
+        capacity:
+          type: integer
+          minimum: 1
+        isVip:
+          type: boolean
+      example:
+        cabinId: cabin-vip-02
+        name: VIP Cabin 02
+        capacity: 30
+        isVip: true
+    ServiceType:
+      type: string
+      enum:
+      - CATERING
+      - DECORATION
+      - PHOTO
+      - VIDEO
+      - EQUIPMENT
+    EventService:
+      type: object
+      required:
+      - serviceId
+      - type
+      - description
+      properties:
+        serviceId:
+          type: string
+        type:
+          $ref: '#/components/schemas/ServiceType'
+        description:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+      example:
+        serviceId: srv-301
+        type: CATERING
+        description: Приветственные напитки и канапе для 24 гостей
+        scheduledAt: '2026-11-14T15:30:00+03:00'
+        notes: Confirm final guest count one day before event.
+    CreateServiceRequest:
+      type: object
+      required:
+      - type
+      - description
+      properties:
+        type:
+          $ref: '#/components/schemas/ServiceType'
+        description:
+          type: string
+          minLength: 1
+        scheduledAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+      example:
+        type: CATERING
+        description: Приветственные напитки и канапе для 24 гостей
+        scheduledAt: '2026-11-14T15:30:00+03:00'
+        notes: Confirm final guest count one day before event.
+    StaffRole:
+      type: string
+      enum:
+      - GUEST_MANAGER
+      - DECORATOR
+      - PHOTOGRAPHER
+      - VIDEOGRAPHER
+      - ENGINEER
+      - OTHER
+    StaffAssignment:
+      type: object
+      required:
+      - assignmentId
+      - staffMemberId
+      - role
+      properties:
+        assignmentId:
+          type: string
+        staffMemberId:
+          type: string
+        staffName:
+          type: string
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        briefingTime:
+          type: string
+          format: date-time
+        notes:
+          type: string
+      example:
+        assignmentId: asg-77
+        staffMemberId: staff-018
+        staffName: Ivan Sokolov
+        role: ENGINEER
+        briefingTime: '2026-11-14T15:15:00+03:00'
+        notes: Confirm wheel launch window.
+    CreateStaffAssignmentRequest:
+      type: object
+      required:
+      - staffMemberId
+      - role
+      properties:
+        staffMemberId:
+          type: string
+          minLength: 1
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        briefingTime:
+          type: string
+          format: date-time
+        notes:
+          type: string
+      example:
+        staffMemberId: staff-018
+        role: ENGINEER
+        briefingTime: '2026-11-14T15:15:00+03:00'
+        notes: Confirm wheel launch window.
+    ScheduleItem:
+      type: object
+      required:
+      - eventId
+      - title
+      - startDateTime
+      - endDateTime
+      - status
+      properties:
+        eventId:
+          type: string
+        title:
+          type: string
+        activity:
+          type: string
+          description: Операционный этап, например декорирование, прибытие гостей или запуск колеса.
+        startDateTime:
+          type: string
+          format: date-time
+        endDateTime:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/EventStatus'
+    ScheduleConflict:
+      type: object
+      required:
+      - type
+      - description
+      - eventIds
+      properties:
+        type:
+          type: string
+          enum:
+          - CABIN_OVERLAP
+          - STAFF_DOUBLE_BOOKING
+          - INSUFFICIENT_TIME_GAP
+          - OTHER
+        description:
+          type: string
+        eventIds:
+          type: array
+          items:
+            type: string
+        resourceId:
+          type: string
+        startDateTime:
+          type: string
+          format: date-time
+        endDateTime:
+          type: string
+          format: date-time
+      example: *id003
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              issue:
+                type: string
+      example: *id004
+  responses:
+    BadRequest:
+      description: Обязательные параметры отсутствуют или имеют неверный формат.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: BAD_REQUEST
+            message: Query parameter date is missing.
+    NotFound:
+      description: Запрошенный ресурс не найден.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: EVENT_NOT_FOUND
+            message: Event evt-9999 does not exist.
+    ValidationError:
+      description: Данные запроса не прошли проверку.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: VALIDATION_ERROR
+            message: Данные запроса не прошли проверку.
+            details:
+            - field: endTime
+              issue: Must be later than startTime.
