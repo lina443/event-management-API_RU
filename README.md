@@ -208,7 +208,7 @@ Mock-сервер и коллекция Postman проверяют поведе�
 | [`diagrams.md`](diagrams.md) | Диаграммы бизнес-процесса и взаимодействий |
 | [`event-management-api.postman_collection.json`](event-management-api.postman_collection.json) | Коллекция запросов для проверки контракта |
 | [`mock-server.md`](mock-server.md) | Инструкция по запуску mock-сервера и проверок |
-| `newman-results.png` | Скриншот предыдущего базового прогона; после запуска обновлённых проверок его следует заменить |
+| [`newman-results.png`](newman-results.png) | Скриншот предыдущего базового прогона; после запуска обновлённых проверок его следует заменить |
 
 ### Почему выбран API
 
